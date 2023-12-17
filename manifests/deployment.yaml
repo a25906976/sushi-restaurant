@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sushi1217
+  labels:
+    app: sushi1217
+  namespace: namespace-workflow-1702810157331
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sushi1217
+  template:
+    metadata:
+      labels:
+        app: sushi1217
+    spec:
+      containers:
+        - name: sushi1217
+          image: acrworkflow1702810157331.azurecr.io/image-workflow-1702810157331:latest
+          ports:
+            - containerPort: 3000
