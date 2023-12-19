@@ -8,6 +8,7 @@ import type {
     GetShopResponse,
     GetShopsCategoryResponse,
     GetShopsResponse,
+    MealRevenueDetail,
     ShopData,
     ShopOrderHistoryData,
     UpdateOrderPayload,
@@ -139,6 +140,29 @@ export const getShopsByCategory = async (
     }
 };
 
+export const getShopByUserId = async (
+    req: Request<{ user_id: string }>,
+    res: Response<GetShopsResponse | { error: string }>,
+) => {
+    try {
+        const { user_id } = req.params;
+
+        const dbUser = await userRepo.findById(user_id);
+        if (!dbUser) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        const dbShop = await shopRepo.findByUserId(user_id);
+        if (!dbShop) {
+            return res.status(404).json({ error: 'Shop not found' });
+        }
+
+        return res.status(200).json(dbShop);
+    } catch (err) {
+        genericErrorHandler(err, res);
+    }
+};
+
 export const createShop = async (
     req: Request<never, never, CreateShopPayload>,
     res: Response<CreateShopResponse | { error: string }>,
@@ -234,6 +258,7 @@ export const deleteShop = async (
     }
 };
 
+// update order status, send email notification, and update meal quantity
 export const updateOrder = async (
     req: Request<
         { order_id: string; shop_id: string },
@@ -245,6 +270,7 @@ export const updateOrder = async (
     try {
         const { order_id, shop_id } = req.params;
 
+        // error handling
         const oldOrder = await orderRepo.findById(order_id);
         if (!oldOrder) {
             return res.status(404).json({ error: 'Order not found' });
@@ -284,17 +310,53 @@ export const updateOrder = async (
                 error: 'UserId of Shop not found in UserDB in cancelOrder',
             });
         }
-        const shopEmail = shopUserData?.email;
-        await orderRepo.sendEmailToUser(userEmail, status_received);
-        await orderRepo.sendEmailToShop(shopEmail, status_received);
 
+        // update meal quantity
+        if (
+            status_received === OrderStatus.INPROGRESS ||
+            status_received === OrderStatus.CANCELLED
+        ) {
+            const orderItems = await orderItemRepo.findByOrderId(order_id);
+            for (const orderItem of orderItems) {
+                const meal = await mealRepo.findById(orderItem.meal_id);
+                if (!meal) {
+                    return res.status(404).json({
+                        error: `Meal ${orderItem.meal_id} does not exist`,
+                    });
+                }
+
+                let newStock;
+                if (status_received === OrderStatus.INPROGRESS) {
+                    newStock = meal.quantity - orderItem.quantity;
+                } else {
+                    newStock = meal.quantity + orderItem.quantity;
+                }
+
+                if (newStock < 0) {
+                    return res.status(400).json({
+                        error: `Stock of ${meal.id} is not enough`,
+                    });
+                }
+                await mealRepo.updateById(meal.id, { quantity: newStock });
+            }
+        }
+
+        // update order status
         const payLoad: UpdateOrderPayload = { status: status_received };
-
         const result = await orderRepo.updateById(order_id, payLoad);
 
         if (!result) {
             return res.status(404).json({ error: 'Update fails' });
         }
+
+        const orderDetails = await orderRepo.findDetailsByOrderId(order_id);
+        if (!orderDetails) {
+            return res.status(404).json({ error: 'Order Details not found' });
+        }
+        // send email to user and shop
+        const shopEmail = shopUserData?.email;
+        orderRepo.sendEmailToUser(orderDetails, userEmail, status_received);
+        orderRepo.sendEmailToShop(orderDetails, shopEmail, status_received);
 
         res.status(200).send('OK');
     } catch (err) {
@@ -361,7 +423,7 @@ export const getRevenue = async (
 
 export const getRevenueDetails = async (
     req: Request<{ shop_id: string; year: string; month: string }>,
-    res: Response<{ mealSales: Record<string, number> } | { error: string }>,
+    res: Response<{ mealDetails: MealRevenueDetail[] } | { error: string }>,
 ) => {
     try {
         const { shop_id } = req.params;
@@ -395,7 +457,7 @@ export const getRevenueDetails = async (
             targetMonth,
         );
 
-        const mealSales: Record<string, number> = {};
+        const mealDetailsMap: Record<string, MealRevenueDetail> = {};
 
         for (const order of dbOrders) {
             if (order.status !== OrderStatus.FINISHED) {
@@ -407,14 +469,27 @@ export const getRevenueDetails = async (
                 const meal = await mealRepo.findById(orderItem.meal_id);
                 if (meal) {
                     const mealName = meal.name;
+                    const mealPrice = meal.price;
+                    const quantity = orderItem.quantity;
+                    const revenue = mealPrice * quantity;
 
-                    mealSales[mealName] = mealSales[mealName] || 0;
-                    mealSales[mealName] += orderItem.quantity;
+                    if (!mealDetailsMap[meal.id]) {
+                        mealDetailsMap[meal.id] = {
+                            meal_name: mealName,
+                            meal_price: mealPrice,
+                            quantity: 0,
+                            revenue: 0,
+                        };
+                    }
+
+                    mealDetailsMap[meal.id].quantity += quantity;
+                    mealDetailsMap[meal.id].revenue += revenue;
                 }
             }
         }
+        const mealDetails: MealRevenueDetail[] = Object.values(mealDetailsMap);
 
-        return res.status(200).json({ mealSales });
+        return res.status(200).json({ mealDetails });
     } catch (err) {
         return genericErrorHandler(err, res);
     }
@@ -427,15 +502,6 @@ export const uploadImageForShop = async (
     res: Response,
 ) => {
     try {
-        console.log('Request Body:', req.body);
-        console.log('Request File:', req.file);
-
-        if (!req.file) {
-            return res
-                .status(400)
-                .json({ error: 'Image payload is missing 1.' });
-        }
-
         const { shop_id } = req.params;
         const imagePayload = req.file;
 
@@ -517,15 +583,6 @@ export const uploadImageForMeal = async (
     res: Response,
 ) => {
     try {
-        console.log('Request Body:', req.body);
-        console.log('Request File:', req.file);
-
-        if (!req.file) {
-            return res
-                .status(400)
-                .json({ error: 'Image payload is missing 1.' });
-        }
-
         const { shop_id, meal_id } = req.params;
         const dbMeal = await mealRepo.findById(meal_id);
         if (!dbMeal) {
@@ -640,6 +697,7 @@ export const getOrdersByShopId = async (
                     meal_name: meal.name,
                     quantity: orderItem.quantity,
                     sum_price: sum_price,
+                    remark: orderItem.remark,
                 };
             });
 
@@ -652,7 +710,6 @@ export const getOrdersByShopId = async (
                 order_date: dbOrder.order_date,
                 order_items: mealData,
                 total_price: total_price,
-                remark: dbOrder.remark,
             };
         });
 

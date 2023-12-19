@@ -3,7 +3,7 @@ import type {
     CreateUserPayload,
     CreateUserResponse,
     GetOrderDetailsPayload,
-    GetOrderResponse,
+    GetOrderDetailsResponse,
     GetOrdersByUserIdResponse,
     GetUserResponse,
     GetUsersResponse,
@@ -15,6 +15,7 @@ import type {
     userLoginPayload,
     userLoginResponse,
 } from '@lib/shared_types';
+import bcrypt from 'bcrypt';
 import type { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 
@@ -60,6 +61,7 @@ export const getUser = async (
     }
 };
 
+const saltRounds = 10;
 export const createUser = async (
     req: Request<never, never, CreateUserPayload>,
     res: Response<CreateUserResponse | { error: string }>,
@@ -74,9 +76,11 @@ export const createUser = async (
             return res.status(404).json({ error: 'User already exists' });
         }
 
+        const hashedPassword = await bcrypt.hash(password, saltRounds);
+
         const payload: Omit<UserData, 'id'> = {
             account,
-            password,
+            password: hashedPassword,
             username,
             email,
             phone,
@@ -109,6 +113,14 @@ export const updateUser = async (
         }
 
         const payLoad = req.body;
+
+        if (payLoad.password) {
+            const hashedPassword = await bcrypt.hash(
+                payLoad.password,
+                saltRounds,
+            );
+            payLoad.password = hashedPassword;
+        }
 
         const result = await userRepo.updateById(id, payLoad);
 
@@ -171,6 +183,7 @@ export const getOrdersByUserId = async (
             }
 
             return {
+                order_id: dbOrder.id,
                 status: dbOrder.status,
                 order_date: dbOrder.order_date,
                 order_price: order_price,
@@ -195,22 +208,40 @@ export const userLogin = async (
     try {
         const { account, password } = req.body;
 
-        console.log(account);
         const dbUser = await userRepo.findByAccount(account);
-        console.log(dbUser);
+
+        if (process.env.NODE_ENV !== 'test') {
+            console.log(account);
+            console.log(dbUser);
+        }
         if (!dbUser) {
             return res.status(404).json({ error: 'User not found' });
         }
 
-        if (dbUser.password !== password) {
-            return res.status(404).json({ error: 'Wrong password' });
+        const isMatch = await bcrypt.compare(password, dbUser.password);
+        if (!isMatch) {
+            return res.status(401).json({ error: 'Wrong password' });
         }
 
         const token = jwt.sign({ userId: dbUser.id }, 'your_jwt_secret', {
             expiresIn: '1h',
         });
 
-        return res.status(200).json({ id: dbUser.id, token: token });
+        let shop_id;
+        const dbShop = await shopRepo.findByUserId(dbUser.id);
+        if (dbUser.role == '店家') {
+            if (!dbShop || dbShop?.length == 0) {
+                shop_id = 'none';
+            } else {
+                shop_id = dbShop[0].id;
+            }
+        } else {
+            shop_id = 'none';
+        }
+
+        return res
+            .status(200)
+            .json({ id: dbUser.id, token: token, shop_id: shop_id });
     } catch (err) {
         genericErrorHandler(err, res);
     }
@@ -218,7 +249,7 @@ export const userLogin = async (
 
 export const getOrderDetails = async (
     req: Request<GetOrderDetailsPayload>,
-    res: Response<GetOrderResponse | { error: string }>,
+    res: Response<GetOrderDetailsResponse | { error: string }>,
 ) => {
     try {
         const { user_id, id } = req.params;
@@ -236,6 +267,7 @@ export const getOrderDetails = async (
     }
 };
 
+// cancel order, send email, and update meal quantity
 export const cancelOrder = async (
     req: Request<CancelOrderPayload>,
     res: Response<UpdateOrderResponse | { error: string }>,
@@ -243,19 +275,13 @@ export const cancelOrder = async (
     try {
         const { id, user_id } = req.params;
 
+        // error handling
         const oldOrder = await orderRepo.findById(id);
         if (!oldOrder) {
             return res.status(404).json({ error: 'Order not found' });
         }
         if (oldOrder.user_id !== user_id) {
             return res.status(403).json({ error: 'Permission denied' });
-        }
-
-        const payLoad = { status: OrderStatus.CANCELLED };
-        const result = await orderRepo.updateById(id, payLoad);
-
-        if (!result) {
-            return res.status(404).json({ error: 'Update fails' });
         }
 
         const userData = await userRepo.findById(oldOrder.user_id);
@@ -277,9 +303,46 @@ export const cancelOrder = async (
                 error: 'UserId of Shop not found in UserDB in cancelOrder',
             });
         }
+
+        // update meal quantity
+        if (oldOrder.status !== OrderStatus.CANCELLED) {
+            const orderItems = await orderItemRepo.findByOrderId(id);
+            for (const orderItem of orderItems) {
+                const meal = await mealRepo.findById(orderItem.meal_id);
+                if (!meal) {
+                    return res.status(404).json({
+                        error: `Meal ${orderItem.meal_id} does not exist`,
+                    });
+                }
+                const newStock = meal.quantity + orderItem.quantity;
+                await mealRepo.updateById(meal.id, { quantity: newStock });
+            }
+        }
+
+        // cancel order
+        const payLoad = { status: OrderStatus.CANCELLED };
+        const result = await orderRepo.updateById(id, payLoad);
+
+        if (!result) {
+            return res.status(404).json({ error: 'Update fails' });
+        }
+
+        const orderDetails = await orderRepo.findDetailsByOrderId(id);
+        if (!orderDetails) {
+            return res.status(404).json({ error: 'Order Details not found' });
+        }
+        // send email to user and shop
         const shopEmail = shopUserData?.email;
-        await orderRepo.sendEmailToUser(userEmail, OrderStatus.CANCELLED);
-        await orderRepo.sendEmailToShop(shopEmail, OrderStatus.CANCELLED);
+        orderRepo.sendEmailToUser(
+            orderDetails,
+            userEmail,
+            OrderStatus.CANCELLED,
+        );
+        orderRepo.sendEmailToShop(
+            orderDetails,
+            shopEmail,
+            OrderStatus.CANCELLED,
+        );
 
         res.status(200).send('OK');
     } catch (err) {

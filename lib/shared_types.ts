@@ -28,12 +28,11 @@ export type deleteUserResponse = "OK";
 
 export type userLoginPayload = Pick<UserData, "account" | "password">;
 
-export type userLoginResponse = {id:string, token: string};
+export type userLoginResponse = {id:string, token: string, shop_id: string};
 
 //----------
 
 export enum OrderStatus {
-    CART = "cart",
     WAITING = "waiting",
     INPROGRESS = "inprogress",
     READY = "ready",
@@ -48,8 +47,24 @@ export type OrderData = {
     order_items: Omit<OrderItemData, "id" | "order_id">[];
     order_date: string;
     status: string;
-    remark: string;
 };
+
+export type OrderDetailsData = {
+    id: string;
+    user_id: string;
+    status: string;
+    date: string;
+    order_items: {
+        meal_name: string;
+        quantity: number;
+        meal_price: number;
+        remark: string;
+    }[];
+    shop_name: string;
+    shop_id: string;
+    total_price: number;
+}
+
 
 export type CreateOrderPayload = Omit<OrderData, "id" | "order_date" | "status">;
 
@@ -61,11 +76,12 @@ export type GetOrdersResponse = GetOrderResponse[];
 
 export type GetOrderDetailsPayload = Pick<OrderData, "id" | "user_id">;
 
+export type GetOrderDetailsResponse = OrderDetailsData;
+
 export type UpdateOrderPayload = Pick<OrderData, "status">;
 
 export type CancelOrderPayload = Pick<OrderData, "id" | "user_id">;
 
-export type GetOrderDetailsResponse = OrderData;
 
 export type UpdateOrderResponse = "OK";
 
@@ -74,6 +90,7 @@ export type DeleteOrderResponse = "OK";
 //--------
 
 export type UserOrderHistoryData = {
+    order_id: string;
     status: string;
     order_date: string;
     order_price: number;
@@ -91,9 +108,9 @@ export type ShopOrderHistoryData = {
         meal_name: string;
         quantity: number;
         sum_price: number;
+        remark: string;
     }[];
     total_price: number;
-    remark: string;
 }
 
 export type GetOrdersByShopIdResponse = ShopOrderHistoryData[];
@@ -105,6 +122,7 @@ export type OrderItemData = {
     order_id: string;
     meal_id: string; // search name, price via meal_id
     quantity: number;
+    remark: string;
 };
 
 export type CreateOrderItemPayload = Omit<OrderItemData, "id">;
@@ -149,6 +167,7 @@ export type MealData = {
     quantity: number;
     category: string;
     image: string;
+    active: boolean;
 }
 
 export type ReviewData = {
@@ -165,6 +184,13 @@ export enum CategoryList {
     Korean = "韓式",
     HongKong = "港式",
     Beverage = "飲料",
+}
+
+export type MealRevenueDetail = {
+    meal_name: string,
+    meal_price: number,
+    quantity: number,
+    revenue: number,
 }
 
 export type CreateShopPayload = Omit<ShopData, "id">;
@@ -187,7 +213,7 @@ export type GetShopImageUrlResponse = Pick<ShopData, "image">;
 
 //---------
 
-export type CreateMealPayload = Omit<MealData, "id">;
+export type CreateMealPayload = Omit<MealData, "id"| "status">;
 
 export type CreateMealResponse = Pick<MealData, "id">;
 
@@ -197,7 +223,7 @@ export type GetMealsResponse = GetMealResponse[];
 
 export type UpdateMealPayload = Partial<Omit<MealData, "id">>;
 
-export type UpdateMealResponse = "OK";
+export type UpdateMealResponse = Pick<MealData, "id">;
 
 export type DeleteMealResponse = "OK";
 

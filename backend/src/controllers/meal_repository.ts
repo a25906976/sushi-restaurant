@@ -7,11 +7,13 @@ import type {
 } from '@lib/shared_types';
 
 import MealModel from '../models/meal';
+import redis from '../utils/redis';
 
 interface IMealRepository {
     findAll(): Promise<GetMealsResponse>;
     findAllbyShopId(shop_id: string): Promise<GetMealsResponse>;
     findById(id: string): Promise<GetMealResponse | null>;
+    findByName(id: string): Promise<GetMealsResponse | null>;
     existsByShopAndName(shop_id: string, name: string): Promise<boolean>;
     create(payload: CreateMealPayload): Promise<CreateMealResponse>;
     updateById(id: string, payload: UpdateMealPayload): Promise<boolean>;
@@ -28,7 +30,39 @@ export class MongoMealRepository implements IMealRepository {
     }
 
     async findById(id: string): Promise<GetMealResponse | null> {
-        return MealModel.findById(id);
+        const cachedMeal = await redis?.get(`meal:${id}`);
+        if (cachedMeal) {
+            return JSON.parse(cachedMeal);
+        }
+
+        const meal = await MealModel.findById(id);
+        if (!meal) {
+            return null;
+        }
+        const mealResponse: GetMealResponse = {
+            id: meal._id.toString(),
+            shop_id: meal.shop_id,
+            name: meal.name,
+            description: meal.description,
+            price: meal.price,
+            quantity: meal.quantity,
+            category: meal.category,
+            image: meal.image,
+            active: meal.active,
+        };
+
+        await redis?.set(
+            `meal:${id}`,
+            JSON.stringify(mealResponse),
+            'EX',
+            3600,
+        );
+
+        return mealResponse;
+    }
+
+    async findByName(name: string): Promise<GetMealsResponse> {
+        return MealModel.find({ name: name });
     }
 
     async existsByShopAndName(shop_id: string, name: string): Promise<boolean> {
@@ -47,11 +81,25 @@ export class MongoMealRepository implements IMealRepository {
         const result = await MealModel.findByIdAndUpdate(id, payload, {
             new: true,
         });
-        return result != null;
+        if (result) {
+            await redis?.set(`meal:${id}`, JSON.stringify(result), 'EX', 3600);
+            return true;
+        }
+        return false;
     }
 
     async deleteById(id: string): Promise<boolean> {
-        const result = await MealModel.findByIdAndDelete(id);
-        return result != null;
+        const result = await MealModel.findByIdAndUpdate(
+            id,
+            { active: false },
+            {
+                new: true,
+            },
+        );
+        if (result) {
+            await redis?.set(`meal:${id}`, JSON.stringify(result), 'EX', 3600);
+            return true;
+        }
+        return false;
     }
 }

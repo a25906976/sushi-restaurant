@@ -74,7 +74,7 @@ export const createOrder = async (
     res: Response<CreateOrderResponse | { error: string }>,
 ) => {
     try {
-        const { user_id, shop_id, order_items, remark } = req.body;
+        const { user_id, shop_id, order_items } = req.body;
 
         const dbUser = await userRepo.findById(user_id);
         if (!dbUser) {
@@ -85,13 +85,18 @@ export const createOrder = async (
         if (!dbShop) {
             return res.status(404).json({ error: 'Shop not found' });
         }
+        const shopUserData = await userRepo.findById(dbShop?.user_id);
+        if (shopUserData === null) {
+            return res.status(403).json({
+                error: 'UserId of Shop not found in UserDB in cancelOrder',
+            });
+        }
 
         const payload: Omit<OrderData, 'id'> = {
             shop_id: shop_id,
             user_id: user_id,
             order_date: new Date().toISOString(),
-            status: OrderStatus.CART,
-            remark: remark,
+            status: OrderStatus.WAITING,
             order_items: [],
         };
 
@@ -118,11 +123,18 @@ export const createOrder = async (
                 order_id: newOrder.id,
                 meal_id: item.meal_id,
                 quantity: item.quantity,
+                remark: item.remark,
             };
             return orderItemRepo.create(orderItemPayload);
         });
 
         await Promise.all(orderItemPromises);
+        const orderDetails = await orderRepo.findDetailsByOrderId(newOrder.id);
+        if (!orderDetails) {
+            return res.status(404).json({ error: 'Order Details not found' });
+        }
+        const shopEmail = shopUserData?.email;
+        orderRepo.sendEmailToShop(orderDetails, shopEmail, OrderStatus.WAITING);
 
         return res.status(201).json({ id: newOrder.id });
     } catch (err) {

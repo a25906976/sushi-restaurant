@@ -8,12 +8,16 @@ import BackgroundImage from "./components/ui/BackgroundImage";
 import "./index.css";
 import AboutPage from "./pages/AboutPage/AboutPage";
 import CartPage from "./pages/BuyPage/CartPage/CartPage";
+import Allmeals from "./pages/BuyPage/MealPage/AllMealsPage/Allmeals";
 import MealCategoryPage from "./pages/BuyPage/MealPage/MealCategoryPage/MealCategoryPage";
-import MealShoplistPage from "./pages/BuyPage/MealPage/MealShoplistPage/MealShopListPage";
+import MealShoplistPage from "./pages/BuyPage/MealPage/MealShopListPage/MealShopListPage";
 import HomePage from "./pages/HomePage/HomePage";
-import RecordPage from "./pages/RecordPage/RecordPage";
+import BuyerOrderPage from "./pages/OrderPage/BuyerOrderPage/BuyerOrderPage";
+import BuyerOrderDetail from "./pages/OrderPage/BuyerOrderPage/_components/BuyerOrderDetail";
+import SalerOrderPage from "./pages/OrderPage/SalerOrderPage/SalerOrderPage";
 import RevenuePage from "./pages/SellPage/SalePage/RevenuePage/RevenuePage";
 import StockPage from "./pages/SellPage/SalePage/StockPage/StockPage";
+import ShopBuyerPage from "./pages/SellPage/ShopPage/ShopBuyerpage";
 import ShopEditPage from "./pages/SellPage/ShopPage/ShopEditPage";
 import ShopPage from "./pages/SellPage/ShopPage/ShopPage";
 import SessionsPage from "./pages/SessionsPage/SessionsPage";
@@ -39,10 +43,18 @@ const Website: React.FC = () => {
           <Route path="/" element={<HomePage />} />
           <Route path="/user" element={<UserPage />} />
           <Route path="/meal" element={<MealCategoryPage />} />
-          <Route path="/meal/category/:title" element={<MealShoplistPage />} />
+          <Route
+            path="/meal/category/:category"
+            element={<MealShoplistPage />}
+          />
           <Route path="/about" element={<AboutPage />} />
           <Route path="/sessions" element={<SessionsPage />} />
-          <Route path="/record" element={<RecordPage />} />
+          <Route path="/order/buyer/:id" element={<BuyerOrderPage />} />
+          <Route
+            path="/order/buyer/:id/:order_id"
+            element={<BuyerOrderDetail />}
+          />
+          <Route path="/order/saler" element={<SalerOrderPage />} />
           <Route path="/signup" element={<SignUpPage />} />
           <Route path="/cart" element={<CartPage />} />
           <Route path="/signin" element={<SignInPage />} />
@@ -50,6 +62,8 @@ const Website: React.FC = () => {
           <Route path="/shopedit" element={<ShopEditPage />} />
           <Route path="/revenue" element={<RevenuePage />} />
           <Route path="/stock" element={<StockPage />} />
+          <Route path="/shopbuyer/:shopId" element={<ShopBuyerPage />} />
+          <Route path="/allmeals" element={<Allmeals />} />
         </Routes>
         {/* other components that are not routing-related */}
       </Router>
